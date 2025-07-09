@@ -43,23 +43,44 @@ const FaceScanner: React.FC<FaceScannerProps> = ({ onCapture, onCancel, isLoadin
 
   // Capture image from video stream
   const captureImage = useCallback(() => {
-    if (!videoRef.current || !canvasRef.current) return;
+    if (!videoRef.current || !canvasRef.current) {
+      console.error('Video or canvas ref not available');
+      return;
+    }
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
 
-    if (!ctx) return;
+    if (!ctx) {
+      console.error('Canvas context not available');
+      return;
+    }
+
+    // Ensure video is ready and has dimensions
+    if (video.videoWidth === 0 || video.videoHeight === 0) {
+      console.error('Video not ready - no dimensions');
+      return;
+    }
 
     // Set canvas dimensions to match video
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
 
+    console.log('Capturing image:', { 
+      videoWidth: video.videoWidth, 
+      videoHeight: video.videoHeight,
+      canvasWidth: canvas.width,
+      canvasHeight: canvas.height
+    });
+
     // Draw video frame to canvas
-    ctx.drawImage(video, 0, 0);
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
     // Convert to base64
-    const imageData = canvas.toDataURL('image/jpeg', 0.8);
+    const imageData = canvas.toDataURL('image/jpeg', 0.9);
+    console.log('Captured image data length:', imageData.length);
+    
     setCapturedImage(imageData);
 
     // Stop camera stream
@@ -79,11 +100,11 @@ const FaceScanner: React.FC<FaceScannerProps> = ({ onCapture, onCancel, isLoadin
       setCountdown((prev) => {
         if (prev <= 1) {
           clearInterval(interval);
-          // Capture image after countdown
+          // Capture image after countdown with additional delay to ensure video is ready
           setTimeout(() => {
             captureImage();
             setIsScanning(false);
-          }, 500);
+          }, 1000);
           return 0;
         }
         return prev - 1;
