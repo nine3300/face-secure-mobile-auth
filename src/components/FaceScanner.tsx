@@ -1,5 +1,5 @@
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Camera, RotateCcw, Check, X } from 'lucide-react';
 
@@ -13,10 +13,65 @@ const FaceScanner: React.FC<FaceScannerProps> = ({ onCapture, onCancel, isLoadin
   const [isScanning, setIsScanning] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [countdown, setCountdown] = useState(0);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Simulate camera countdown
-  const startScan = useCallback(() => {
+  // Initialize camera
+  const initCamera = useCallback(async () => {
+    try {
+      setCameraError(null);
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'user',
+          width: { ideal: 640 },
+          height: { ideal: 480 }
+        }
+      });
+      
+      setCameraStream(stream);
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch (error) {
+      console.error('Camera access error:', error);
+      setCameraError('Unable to access camera. Please check permissions.');
+    }
+  }, []);
+
+  // Capture image from video stream
+  const captureImage = useCallback(() => {
+    if (!videoRef.current || !canvasRef.current) return;
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+
+    if (!ctx) return;
+
+    // Set canvas dimensions to match video
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    // Draw video frame to canvas
+    ctx.drawImage(video, 0, 0);
+
+    // Convert to base64
+    const imageData = canvas.toDataURL('image/jpeg', 0.8);
+    setCapturedImage(imageData);
+
+    // Stop camera stream
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+      setCameraStream(null);
+    }
+  }, [cameraStream]);
+
+  // Start camera scan with countdown
+  const startScan = useCallback(async () => {
+    await initCamera();
     setIsScanning(true);
     setCountdown(3);
     
@@ -24,10 +79,9 @@ const FaceScanner: React.FC<FaceScannerProps> = ({ onCapture, onCancel, isLoadin
       setCountdown((prev) => {
         if (prev <= 1) {
           clearInterval(interval);
-          // Simulate capture after countdown
+          // Capture image after countdown
           setTimeout(() => {
-            const mockImageData = `data:image/jpeg;base64,${Date.now()}`;
-            setCapturedImage(mockImageData);
+            captureImage();
             setIsScanning(false);
           }, 500);
           return 0;
@@ -35,7 +89,7 @@ const FaceScanner: React.FC<FaceScannerProps> = ({ onCapture, onCancel, isLoadin
         return prev - 1;
       });
     }, 1000);
-  }, []);
+  }, [initCamera, captureImage]);
 
   // Handle file input for demo purposes
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -62,6 +116,15 @@ const FaceScanner: React.FC<FaceScannerProps> = ({ onCapture, onCancel, isLoadin
     setIsScanning(false);
   };
 
+  // Cleanup camera stream on unmount
+  useEffect(() => {
+    return () => {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [cameraStream]);
+
   return (
     <div className="space-y-6">
       {/* Camera View */}
@@ -73,42 +136,64 @@ const FaceScanner: React.FC<FaceScannerProps> = ({ onCapture, onCancel, isLoadin
             className="w-full h-full object-cover"
           />
         ) : (
-          <div className="w-full h-full flex items-center justify-center">
-            {isScanning ? (
-              <div className="text-center">
-                <div className="relative">
-                  <div className="w-32 h-32 border-4 border-white/30 rounded-full mb-4 mx-auto"></div>
-                  <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
+          <>
+            {/* Live camera feed */}
+            {cameraStream && (
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover"
+              />
+            )}
+            
+            {/* Overlay content */}
+            <div className="absolute inset-0 flex items-center justify-center">
+              {cameraError ? (
+                <div className="text-center text-white">
+                  <Camera className="h-16 w-16 mx-auto mb-4 opacity-50" />
+                  <p className="text-red-400 mb-2">{cameraError}</p>
+                  <p className="text-sm">Please allow camera access and try again</p>
+                </div>
+              ) : isScanning ? (
+                <div className="text-center">
+                  <div className="relative">
                     {countdown > 0 ? (
-                      <div className="text-4xl font-bold text-white animate-pulse">
+                      <div className="text-6xl font-bold text-white animate-pulse drop-shadow-lg">
                         {countdown}
                       </div>
                     ) : (
                       <div className="text-white">
                         <div className="animate-spin rounded-full h-8 w-8 border-2 border-white/30 border-t-white mx-auto mb-2"></div>
-                        <p>Capturing...</p>
+                        <p className="drop-shadow-lg">Capturing...</p>
                       </div>
                     )}
                   </div>
+                  {countdown > 0 && (
+                    <p className="text-white/80 text-sm mt-4 drop-shadow-lg">Keep your face in the circle</p>
+                  )}
                 </div>
-                <p className="text-white/80 text-sm">Keep your face in the circle</p>
-              </div>
-            ) : (
-              <div className="text-center text-white/60">
-                <Camera className="h-16 w-16 mx-auto mb-4" />
-                <p>Camera preview will appear here</p>
-                <p className="text-sm mt-2">Position your face in the center</p>
+              ) : !cameraStream ? (
+                <div className="text-center text-white/60">
+                  <Camera className="h-16 w-16 mx-auto mb-4" />
+                  <p>Click "Start Face Scan" to begin</p>
+                  <p className="text-sm mt-2">Position your face in the center</p>
+                </div>
+              ) : null}
+            </div>
+
+            {/* Face detection circle overlay when scanning */}
+            {isScanning && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="w-64 h-64 border-4 border-green-400 rounded-full animate-pulse drop-shadow-lg"></div>
               </div>
             )}
-          </div>
+          </>
         )}
 
-        {/* Face detection overlay when scanning */}
-        {isScanning && countdown === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-48 h-48 border-4 border-green-400 rounded-full animate-pulse"></div>
-          </div>
-        )}
+        {/* Hidden canvas for image capture */}
+        <canvas ref={canvasRef} className="hidden" />
       </div>
 
       {/* Instructions */}
